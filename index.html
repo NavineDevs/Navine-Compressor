@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Navine Compressor</title>
+
+<style>
+:root{
+  --bg:#05070c;
+  --card:#0b1222;
+  --royal:#1f3cff;
+  --electric:#00c8ff;
+  --border:rgba(0,200,255,.25);
+}
+body{
+  margin:0; min-height:100vh; display:grid; place-items:center;
+  background:radial-gradient(circle at top,#08142e,#05070c 70%);
+  color:#e6f1ff; font-family:system-ui,Segoe UI,Arial;
+}
+.container{
+  width:min(560px,92vw);
+  background:linear-gradient(180deg,#0b1222,#070c18);
+  border-radius:16px; padding:24px;
+  box-shadow:0 0 35px rgba(0,200,255,.18),
+             inset 0 0 0 1px var(--border);
+}
+h1{
+  margin:0; text-align:center; font-size:26px;
+  color:var(--electric);
+  text-shadow:0 0 12px rgba(0,200,255,.45);
+}
+.sub{ text-align:center; font-size:13px; opacity:.85; margin:8px 0 18px; }
+.row{ margin:14px 0; }
+label{ font-size:13px; opacity:.9; }
+input, select{ width:100%; margin-top:6px; }
+button{
+  width:100%; margin-top:14px; padding:13px;
+  font-size:15px; font-weight:600; color:white;
+  border:none; border-radius:12px; cursor:pointer;
+  background:linear-gradient(135deg,var(--royal),var(--electric));
+  box-shadow:0 0 18px rgba(0,200,255,.35);
+}
+button:disabled{ opacity:.55; cursor:not-allowed; }
+.progress{
+  height:14px; background:#0a1020; border-radius:999px;
+  overflow:hidden; border:1px solid var(--border);
+  margin-top:16px;
+}
+.bar{
+  height:100%; width:0%;
+  background:linear-gradient(90deg,var(--royal),var(--electric));
+  transition:width .12s linear;
+}
+.status{
+  margin-top:10px; font-size:13px;
+  text-align:center; white-space:pre-line;
+}
+a{ color:var(--electric); }
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Navine Compressor</h1>
+  <div class="sub">Videos • Audio • Images — All Client-Side</div>
+
+  <div class="row">
+    <label>Select file</label>
+    <input id="file" type="file">
+    <div id="info" class="sub">No file selected</div>
+  </div>
+
+  <div class="row">
+    <label>Quality</label>
+    <input id="quality" type="range" min="60" max="95" value="85">
+    <div id="qtxt" class="sub">Quality: 85</div>
+  </div>
+
+  <button id="btn">Load Compressor</button>
+
+  <div class="progress"><div class="bar" id="bar"></div></div>
+  <div class="status" id="status">Waiting…</div>
+</div>
+
+<script type="module">
+import { createFFmpeg, fetchFile } from "https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js";
+import imageCompression from "https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/+esm";
+
+const fileEl = document.getElementById("file");
+const info = document.getElementById("info");
+const btn = document.getElementById("btn");
+const bar = document.getElementById("bar");
+const status = document.getElementById("status");
+const qEl = document.getElementById("quality");
+const qTxt = document.getElementById("qtxt");
+
+qEl.oninput = () => qTxt.textContent = "Quality: " + qEl.value;
+
+fileEl.onchange = () => {
+  const f = fileEl.files[0];
+  if (f) info.textContent = `${f.name} — ${(f.size/1024/1024).toFixed(2)} MB`;
+};
+
+function setProgress(v){ bar.style.width = Math.round(v*100) + "%"; }
+
+let ffmpeg, loaded = false;
+
+async function loadFF(){
+  status.textContent = "Loading video engine…";
+  ffmpeg = createFFmpeg({ progress:p=>setProgress(p.ratio||0) });
+  await ffmpeg.load();
+  loaded = true;
+}
+
+btn.onclick = async () => {
+  const file = fileEl.files[0];
+  if (!file) return alert("Select a file first.");
+
+  setProgress(0.05);
+  btn.disabled = true;
+
+  // 🖼️ IMAGE HANDLING
+  if (file.type.startsWith("image/")) {
+    status.textContent = "Compressing image…";
+
+    const compressed = await imageCompression(file,{
+      maxSizeMB: file.size / 1024 / 1024,
+      initialQuality: qEl.value / 100,
+      useWebWorker: true,
+      onProgress: p => setProgress(p/100)
+    });
+
+    const url = URL.createObjectURL(compressed);
+    status.innerHTML = `✅ Image done<br>
+    ${(compressed.size/1024/1024).toFixed(2)} MB<br>
+    <a href="${url}" download="navine-compressed.png">Download</a>`;
+    
+    setProgress(1);
+    btn.disabled = false;
+    return;
+  }
+
+  // 🎬 VIDEO / AUDIO HANDLING
+  if (!loaded) await loadFF();
+
+  status.textContent = "Compressing media…";
+  ffmpeg.FS("writeFile","in",await fetchFile(file));
+
+  await ffmpeg.run(
+    "-i","in",
+    "-c:v","libx264",
+    "-crf","23",
+    "-preset","veryfast",
+    "-c:a","aac",
+    "-b:a","128k",
+    "out.mp4"
+  );
+
+  const data = ffmpeg.FS("readFile","out.mp4");
+  const blob = new Blob([data.buffer],{type:"video/mp4"});
+  const url = URL.createObjectURL(blob);
+
+  status.innerHTML = `✅ Done<br>
+  ${(blob.size/1024/1024).toFixed(2)} MB<br>
+  <a href="${url}" download="navine-compressed.mp4">Download</a>`;
+  setProgress(1);
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
